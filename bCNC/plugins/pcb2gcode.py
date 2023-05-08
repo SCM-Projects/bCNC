@@ -12,9 +12,7 @@ import json
 import subprocess
 
 import Utils
-#from CNC import CNC, Block
 from ToolsPage import Plugin
-#from bFileDialog import askdirectory
 import tkinter as tk
 from tkinter import ttk, filedialog
 
@@ -31,6 +29,7 @@ drill_filetypes = ("Excellon", "*.drl")
 PROJECT_SETTINGS_FILE = "PCB2GCode.json"
 
 DRILL_OUTPUT_FILE = "drill.ngc"
+DRILL_CLONE_FILE = "drill_{}.ngc"
 
 # Project Settings Tags
 FRONT_COPPER = "FRONT_COPPER"
@@ -39,17 +38,16 @@ FRONT_ENGRAVING = "FRONT_ENGRAVING"
 BACK_ENGRAVING = "BACK_ENGRAVING"
 OUTLINE = "OUTLINE"
 DRILLING = "DRILLING"
-#SPLIT_DRILLING = "SPLIT_DRILLING"
 REMOVE_TOOL_CHANGES = "REMOVE_TOOL_CHANGES"
 
 def files_exist(files):
     """Check the list of files supplied to ensure that they all exist
 
     Args:
-        files (list of string): Each entry is a full path to a file.
+        files[string]: Each entry is a full path to a file.
 
     Returns:
-        Bool: True if all files exist, False otherwise.
+        bool: `True` if all files exist, `False` otherwise.
     """
     for f in files:
         if not os.path.isfile(f):
@@ -69,7 +67,8 @@ def remove_files(path, file_pattern):
         try:
             os.remove(f)
         except:
-            print("Error while deleting file : ", f)
+            print("Error while deleting file :", f)
+
 
 # =============================================================================
 # PCB2GCode class
@@ -77,11 +76,12 @@ def remove_files(path, file_pattern):
 class PCB2GCode:
     def __init__(self, plugin, app, name="PCB2GCode"):
         self.name = name
-        self.plugin = plugin
-        self.app = app
+        self.plugin = plugin # the plugin context provides access to the plugin variables 
+        self.app = app # the app context provides all application data and the main UI parent window
         
         self.project_folder = tk.StringVar(value=self.plugin["ProjectPath"])
-        
+    
+        # define data that will be persisted for each project    
         self.project_settings = {
             FRONT_COPPER: tk.StringVar(),
             BACK_COPPER: tk.StringVar(),
@@ -96,26 +96,34 @@ class PCB2GCode:
         self.ui = self.create_ui()
             
     def create_ui(self):
+        """ Build the dialog window for the PCB2GCode user interface.
+        """
         file_icon = Utils.icons["load"]
         ui = tk.Toplevel(self.app)
         ui.title("PCB2GCode GCode Generator")
-        ui.protocol("WM_DELETE_WINDOW", self.dismiss) # intercept close button
+        ui.protocol("WM_DELETE_WINDOW", self.dismiss) # intercept the close button
         ui.geometry("+{}+{}".format(self.app.winfo_x()+100, self.app.winfo_y()+100))
         
         ui.columnconfigure(0, weight=1)
         ui.rowconfigure(0, weight=0)
         ui.rowconfigure(1, weight=0)
         
-        # Create body frame for data entry widgets
+        # Create body frame for path data entry widgets
         self.body_frame = ttk.Frame(ui)
         self.body_frame.grid(column=0, row=0, sticky=tk.EW)
         self.body_frame.columnconfigure(0, weight=0)
         self.body_frame.columnconfigure(1, weight=1)
         self.body_frame.columnconfigure(2, weight=0)
         
+        # Create frame for options widgets
+        self.options_frame = ttk.Frame(ui)
+        self.options_frame.grid(column=0, row=1, sticky=tk.EW)
+        self.options_frame.columnconfigure(0, weight=1)
+        self.options_frame.columnconfigure(1, weight=1)
+        
         # Create frame for buttons
         self.button_frame = ttk.Frame(ui)
-        self.button_frame.grid(column=0, row=1)
+        self.button_frame.grid(column=0, row=2)
         self.button_frame.columnconfigure(0, weight=1)
         self.button_frame.columnconfigure(1, weight=1)
         
@@ -185,13 +193,13 @@ class PCB2GCode:
         self.drilling_btn.grid(column=2, row=row, sticky=tk.W)
         
         # Options
-        row += 1
-        self.checkbox = ttk.Checkbutton(self.body_frame, text="Remove tool changes",
+        row = 0
+        self.checkbox = ttk.Checkbutton(self.options_frame, text="Remove tool changes",
                 command=None,
                 variable=self.project_settings[REMOVE_TOOL_CHANGES],
                 onvalue="Y",
                 offvalue="N")
-        self.checkbox.grid(column=1, row=row)
+        self.checkbox.grid(column=1, row=row, padx=5, pady=5)
         
         # Buttons
         row = 0
@@ -212,10 +220,11 @@ class PCB2GCode:
 
     def show(self):        
         print("Opening the PCB2GCode dialog")   
-        self.ui.transient(self.app)   # dialog window is related to main
+        self.ui.transient(self.app)   # dialog window is a child of the app instance
         self.ui.wait_visibility() # can't grab until window appears, so we wait
-        self.ui.grab_set()        # ensure all input goes to our window
-        self.ui.wait_window()     # block until window is destroyed
+        self.ui.grab_set()        # ensure all input goes to this window
+        self.ui.focus_set()       # set the UI focus to this window
+        self.ui.wait_window()     # block until window is destroyed (i.e. modal dialog)
         
     def ask_project_folder(self):
         folder_path = filedialog.askdirectory(initialdir=self.project_folder.get())
@@ -249,7 +258,8 @@ class PCB2GCode:
         self.ask_filename(self.project_settings[DRILLING], drill_filetypes)
     
     def save_project_settings(self):
-        # save the current project settings to a JSON file in the project folder
+        """Save the current project settings to a JSON file in the project folder
+        """
         project_path = self.project_folder.get()
         if project_path and os.path.isdir(project_path):
             settings_filename = os.path.join(project_path, PROJECT_SETTINGS_FILE)
@@ -259,7 +269,8 @@ class PCB2GCode:
                 json.dump(settings, fp, sort_keys=True, indent=4, ensure_ascii=False)
     
     def load_project_settings(self):
-        # load the saved settings from JSON to the project_settings dictionary
+        """Load the saved settings from JSON to the project_settings dictionary
+        """
         project_path = self.project_folder.get()
         if project_path and os.path.isdir(project_path):
             settings_filename = os.path.join(project_path, PROJECT_SETTINGS_FILE)
@@ -274,6 +285,9 @@ class PCB2GCode:
                     print("Badly formed settings info - ignored") 
                     
     def generate_gcode(self):
+        """Generate the GCode from the input files that have a matching configuration file
+        by invoking the PCB2GCode application.
+        """
         print("About to generate GCode")
         # Check inputs
         executable_path = self.plugin["ExecutablePath"]
@@ -345,16 +359,22 @@ class PCB2GCode:
         # Perform cleanup of SVG files created as a side-effect by PCB2GCode
         remove_files(output_path, "*.svg")
                 
-        # Do any post processing on the drill ngc file to handle tool changes.
+        # Create clones of the drill file, one for each drill tool size.
+        # files are named drill_1.ngc, drill_2.ngc, etc.
         self.split_drill_sizes(output_path)
         
+        # If required, do post processing on all the GCode files to remove tool changes.
         if self.project_settings[REMOVE_TOOL_CHANGES].get() == "Y":
             self.remove_tool_changes(output_path)
         
         # Then finally
         self.dismiss()
+        self.app.refresh()
+        self.app.setStatus(_("PCB2GCode created files in {}".format(output_path)))
         
     def split_drill_sizes(self, output_path):
+        """ Splits the drill GCode file into multiple files, one per drill tool size
+        """
         drill_file_path = os.path.join(output_path, DRILL_OUTPUT_FILE)
         if not os.path.isfile(drill_file_path):
             print("No drill file")
@@ -402,7 +422,7 @@ class PCB2GCode:
         tool_id = 0
         for body in body_sections:
             tool_id += 1
-            file_name = "drill_{}.ngc".format(tool_id)
+            file_name = DRILL_CLONE_FILE.format(tool_id)
             file_path = os.path.join(output_path, file_name)
             with open(file_path, "w") as out_file:
                 print("Creating single tool drill file", file_path, "for", body[0])
@@ -414,7 +434,10 @@ class PCB2GCode:
                     out_file.write(line)
             
     def remove_tool_changes(self, output_path):
-        print("Removing all tool changes...")
+        """ Scans all the GCode files in the output folder and comments out
+        any M6 (Tool Change) and related M0 (Pause Job) commands.
+        """
+        print("Removing all tool change commands...")
         gcode_files = glob.glob(os.path.join(output_path, "*.ngc"))
         if not gcode_files:
             print("No GCode files found")
@@ -432,12 +455,10 @@ class PCB2GCode:
                         gcode = ";" + gcode
                     content.append(gcode)
             with open(ngc_file, "wt") as out_file:
-                print("Removed tool changes from ", ngc_file)
+                print("Removed tool changes from", ngc_file)
                 for gcode in content:
                     out_file.write(gcode)
                     
-        
-        
 
 
 # =============================================================================
@@ -450,8 +471,6 @@ class Tool(Plugin):
         Plugin.__init__(self, master, "PCB2GCode")
         self.icon = "tr"
         self.group = "Development"
-
-        #the_folder = askdirectory()
 
         self.variables = [
             ("name", "db", "", _("Name")),
@@ -475,12 +494,11 @@ class Tool(Plugin):
 
     # ----------------------------------------------------------------------
     def execute(self, app):
-        # Invoke the PCB2GCode form to handle the user interaction and conversion
+        """Invoke the PCB2GCode form to handle the user interaction and conversion"""
         dlg = PCB2GCode(self, app)
         dlg.show()       
-        
-        app.refresh()
-        app.setStatus(_("PCB2GCode test complete"))
+
+      
     
 
 
