@@ -79,7 +79,8 @@ class PCB2GCode:
         self.plugin = plugin # the plugin context provides access to the plugin variables 
         self.app = app # the app context provides all application data and the main UI parent window
         
-        self.project_folder = tk.StringVar(value=self.plugin["ProjectPath"])
+        self.project_path = self.plugin["ProjectPath"]
+        self.project_folder = tk.StringVar(value=self.project_path)
     
         # define data that will be persisted for each project    
         self.project_settings = {
@@ -89,7 +90,7 @@ class PCB2GCode:
             BACK_ENGRAVING: tk.StringVar(),
             OUTLINE: tk.StringVar(),
             DRILLING: tk.StringVar(),
-            REMOVE_TOOL_CHANGES: tk.StringVar(value="Y")           
+            REMOVE_TOOL_CHANGES: tk.StringVar(value="")           
         }
         self.load_project_settings()
         
@@ -137,6 +138,7 @@ class PCB2GCode:
         self.project_folder_entry.grid(column=1, row=row, sticky=tk.EW)
         self.project_folder_btn = ttk.Button(self.body_frame, image=file_icon, command=self.ask_project_folder)
         self.project_folder_btn.grid(column=2, row=row, sticky=tk.W)
+        self.project_folder.trace_add("write", self.change_project_path)
                         
         # Front copper entry
         row += 1
@@ -198,7 +200,7 @@ class PCB2GCode:
                 command=None,
                 variable=self.project_settings[REMOVE_TOOL_CHANGES],
                 onvalue="Y",
-                offvalue="N")
+                offvalue="")
         self.checkbox.grid(column=1, row=row, padx=5, pady=5)
         
         # Buttons
@@ -233,7 +235,7 @@ class PCB2GCode:
 
     def ask_filename(self, item, filetypes):
         filepath = filedialog.askopenfilename(filetypes=[filetypes], 
-                                              initialdir=self.project_folder.get(),
+                                              initialdir=self.project_path,
                                               initialfile=item.get())
         filename = os.path.basename(filepath) if filepath else ""
         if filename:
@@ -256,24 +258,36 @@ class PCB2GCode:
             
     def ask_drilling_filename(self):
         self.ask_filename(self.project_settings[DRILLING], drill_filetypes)
-    
+
+    def change_project_path(self, *args):
+        new_project_path = self.project_folder.get()
+        if new_project_path and (new_project_path != self.project_path):
+            self.save_project_settings()
+            self.project_path = new_project_path
+            self.load_project_settings()     
+            
     def save_project_settings(self):
         """Save the current project settings to a JSON file in the project folder
         """
-        project_path = self.project_folder.get()
-        if project_path and os.path.isdir(project_path):
-            settings_filename = os.path.join(project_path, PROJECT_SETTINGS_FILE)
+        if self.project_path and os.path.isdir(self.project_path):
+            self.plugin["ProjectPath"] = self.project_path
+            settings_filename = os.path.join(self.project_path, PROJECT_SETTINGS_FILE)
             # Copy the current settings to a dictionary
             settings = {key: value.get() for (key, value) in self.project_settings.items()}
-            with open(settings_filename, "w") as fp:
-                json.dump(settings, fp, sort_keys=True, indent=4, ensure_ascii=False)
+            # Check if any of the settings are actually used
+            settings_used = False
+            for tag in settings.keys():
+                if settings[tag]:
+                    settings_used = True
+            if settings_used:
+                with open(settings_filename, "w") as fp:
+                    json.dump(settings, fp, sort_keys=True, indent=4, ensure_ascii=False)
     
     def load_project_settings(self):
         """Load the saved settings from JSON to the project_settings dictionary
         """
-        project_path = self.project_folder.get()
-        if project_path and os.path.isdir(project_path):
-            settings_filename = os.path.join(project_path, PROJECT_SETTINGS_FILE)
+        if self.project_path and os.path.isdir(self.project_path):
+            settings_filename = os.path.join(self.project_path, PROJECT_SETTINGS_FILE)
             if os.path.isfile(settings_filename):
                 try:
                     with open(settings_filename, "r") as fp:
@@ -282,7 +296,11 @@ class PCB2GCode:
                         if tag in saved_settings:
                             self.project_settings[tag].set(saved_settings[tag])
                 except:
-                    print("Badly formed settings info - ignored") 
+                    print("Badly formed settings info - ignored")
+            else:
+                # no project settings found, blank out all the settings values
+                for tag in self.project_settings.keys():
+                    self.project_settings[tag].set("")
                     
     def generate_gcode(self):
         """Generate the GCode from the input files that have a matching configuration file
@@ -295,12 +313,11 @@ class PCB2GCode:
             print("Error: No PCB2GCode executable found.")
             return
 
-        project_path = self.project_folder.get()
-        if project_path and os.path.isdir(project_path):
+        if self.project_path and os.path.isdir(self.project_path):
             output_folder = self.plugin["OutputFolder"]
             if output_folder == "":
                 output_folder = "gcode"
-            output_path = os.path.join(project_path, output_folder)
+            output_path = os.path.join(self.project_path, output_folder)
             # Create the output folder if needed
             if not os.path.isdir(output_path):
                 os.mkdir(output_path)
@@ -314,37 +331,37 @@ class PCB2GCode:
         cmd = [executable_path, "--output-dir", output_path, "--config"]
         #Front Copper
         cfg_file = self.plugin["FrontCopperSettings"]
-        in_file = os.path.join(project_path, self.project_settings[FRONT_COPPER].get())
+        in_file = os.path.join(self.project_path, self.project_settings[FRONT_COPPER].get())
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--front", in_file])
             
         #Back Copper
         cfg_file = self.plugin["BackCopperSettings"]
-        in_file = os.path.join(project_path, self.project_settings[BACK_COPPER].get())
+        in_file = os.path.join(self.project_path, self.project_settings[BACK_COPPER].get())
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--back", in_file])
             
         #Front Engraving
         cfg_file = self.plugin["FrontEngravingSettings"]
-        in_file = os.path.join(project_path, self.project_settings[FRONT_ENGRAVING].get())
+        in_file = os.path.join(self.project_path, self.project_settings[FRONT_ENGRAVING].get())
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--front", in_file])
             
         #Back Engraving
         cfg_file = self.plugin["BackEngravingSettings"]
-        in_file = os.path.join(project_path, self.project_settings[BACK_ENGRAVING].get())
+        in_file = os.path.join(self.project_path, self.project_settings[BACK_ENGRAVING].get())
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--back", in_file])
             
         #Outline
         cfg_file = self.plugin["OutlineSettings"]
-        in_file = os.path.join(project_path, self.project_settings[OUTLINE].get())
+        in_file = os.path.join(self.project_path, self.project_settings[OUTLINE].get())
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--outline", in_file])
             
         #Drilling
         cfg_file = self.plugin["DrillSettings"]
-        in_file = os.path.join(project_path, self.project_settings[DRILLING].get())
+        in_file = os.path.join(self.project_path, self.project_settings[DRILLING].get())
         # Note: drill output file name is hard coded to facilitate post-processing
         if files_exist([cfg_file, in_file]):
             joblist.append([*cmd, cfg_file, "--drill", in_file, "--drill-output", DRILL_OUTPUT_FILE])
