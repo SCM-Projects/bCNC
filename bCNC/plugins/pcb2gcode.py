@@ -375,7 +375,10 @@ class PCB2GCode:
             
         # Perform cleanup of SVG files created as a side-effect by PCB2GCode
         remove_files(output_path, "*.svg")
-                
+
+        # Combine all the GCode files (may assist with visualising and verification)
+        self.combine_all_gcode(output_path)
+        
         # Create clones of the drill file, one for each drill tool size.
         # files are named drill_1.ngc, drill_2.ngc, etc.
         self.split_drill_sizes(output_path)
@@ -388,7 +391,7 @@ class PCB2GCode:
         self.dismiss()
         self.app.refresh()
         self.app.setStatus(_("PCB2GCode created files in {}".format(output_path)))
-        
+              
     def split_drill_sizes(self, output_path):
         """ Splits the drill GCode file into multiple files, one per drill tool size
         """
@@ -475,6 +478,28 @@ class PCB2GCode:
                 print("Removed tool changes from", ngc_file)
                 for gcode in content:
                     out_file.write(gcode)
+
+    def combine_all_gcode(self, output_path):
+        """ Scans all the GCode files in the output folder and combines them
+        into a single file.
+        """
+        print("Combining all generated gcode...")
+        gcode_files = glob.glob(os.path.join(output_path, "*.ngc"))
+        if not gcode_files:
+            print("No GCode files found to combine")
+            return
+
+        combined_gcode_file = os.path.join(output_path, "all.ngc")
+        content = ["( Combined GCode )\n"]        
+        # Process all the GCode files
+        for ngc_file in gcode_files:
+            with open(ngc_file, "rt") as in_file:
+                for gcode in in_file:
+                    content.append(gcode)
+        with open(combined_gcode_file, "wt") as out_file:
+            for gcode in content:
+                out_file.write(gcode)
+        
                     
 
 
