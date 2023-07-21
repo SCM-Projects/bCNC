@@ -496,6 +496,8 @@ class PCB2GCode:
             with open(ngc_file, "rt") as in_file:
                 for gcode in in_file:
                     content.append(gcode)
+        
+        # Write everything out to a single file
         with open(combined_gcode_file, "wt") as out_file:
             for gcode in content:
                 out_file.write(gcode)
@@ -512,7 +514,7 @@ class Tool(Plugin):
     def __init__(self, master):
         Plugin.__init__(self, master, "PCB2GCode")
         self.icon = "tr"
-        self.group = "Development"
+        self.group = "CAM"
 
         self.variables = [
             ("name", "db", "", _("Name")),
