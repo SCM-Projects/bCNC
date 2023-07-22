@@ -7,6 +7,7 @@
 
 import os
 import glob
+import shutil
 import re
 import json
 import subprocess
@@ -20,7 +21,7 @@ __author__ = "LWW"
 __email__ = "lloyd.wwynn@gmail.com"
 
 __name__ = _("PCB2Gcode")
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 any_filetypes = ("Any","*.*")
 gerber_filetypes = ("Gerber", "*.gbr")
@@ -68,6 +69,21 @@ def remove_files(path, file_pattern):
             os.remove(f)
         except:
             print("Error while deleting file :", f)
+            
+def copy_files(source_path, dest_path, file_pattern, file_prefix):
+    file_list = glob.glob(os.path.join(source_path, file_pattern))
+    for f in file_list:
+        try:
+            shutil.copy(f, os.path.join(dest_path, file_prefix + os.path.basename(f)))
+        except:
+            print("Error while copying file :", f)
+
+def run_pcb2gcode(cmd_line, output_path, svg_path, svg_prefix=""):
+    print("Running:", cmd_line[-1:])
+    remove_files(output_path, "*.svg")
+    subprocess.run(cmd_line)
+    copy_files(output_path, svg_path, "*.svg", svg_prefix)
+              
 
 
 # =============================================================================
@@ -318,60 +334,59 @@ class PCB2GCode:
             if output_folder == "":
                 output_folder = "gcode"
             output_path = os.path.join(self.project_path, output_folder)
-            # Create the output folder if needed
+            svg_path = os.path.join(self.project_path, "svg")
+            # Create the GCode output folder if needed
             if not os.path.isdir(output_path):
                 os.mkdir(output_path)
             else: # remove any existing gcode files
-                remove_files(output_path, "*.ngc")                
+                remove_files(output_path, "*.ngc")
+            # Create the SVG output folder if needed          
+            if not os.path.isdir(svg_path):
+                os.mkdir(svg_path)
+            else: # remove any existing SVG files
+                remove_files(svg_path, "*.svg")
+            
         else:
             print("Error: No valid output folder.")
             return
             
-        joblist = []
         cmd = [executable_path, "--output-dir", output_path, "--config"]
         #Front Copper
         cfg_file = self.plugin["FrontCopperSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[FRONT_COPPER].get())
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--front", in_file])
+            run_pcb2gcode([*cmd, cfg_file, "--front", in_file], output_path, svg_path, "FRONT_COPPER-")
             
         #Back Copper
         cfg_file = self.plugin["BackCopperSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[BACK_COPPER].get())
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--back", in_file])
+            run_pcb2gcode([*cmd, cfg_file, "--back", in_file], output_path, svg_path, "BACK_COPPER-")
             
         #Front Engraving
         cfg_file = self.plugin["FrontEngravingSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[FRONT_ENGRAVING].get())
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--front", in_file])
+            run_pcb2gcode([*cmd, cfg_file, "--front", in_file], output_path, svg_path, "FRONT_ENGRAVING-")
             
         #Back Engraving
         cfg_file = self.plugin["BackEngravingSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[BACK_ENGRAVING].get())
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--back", in_file])
+            run_pcb2gcode([*cmd, cfg_file, "--back", in_file], output_path, svg_path, "BACK_ENGRAVING-")
             
         #Outline
         cfg_file = self.plugin["OutlineSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[OUTLINE].get())
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--outline", in_file])
+            run_pcb2gcode([*cmd, cfg_file, "--outline", in_file], output_path, svg_path, "OUTLINE-")
             
         #Drilling
         cfg_file = self.plugin["DrillSettings"]
         in_file = os.path.join(self.project_path, self.project_settings[DRILLING].get())
         # Note: drill output file name is hard coded to facilitate post-processing
         if files_exist([cfg_file, in_file]):
-            joblist.append([*cmd, cfg_file, "--drill", in_file, "--drill-output", DRILL_OUTPUT_FILE])
-            
-        # Execute all the GCode generation jobs
-        print("Joblist:")
-        print(joblist)
-        for job in joblist:
-            print("Running:", job[-1:])
-            subprocess.run(job)
+            run_pcb2gcode([*cmd, cfg_file, "--drill", in_file, "--drill-output", DRILL_OUTPUT_FILE], output_path, svg_path, "DRILL-")
             
         # Perform cleanup of SVG files created as a side-effect by PCB2GCode
         remove_files(output_path, "*.svg")
@@ -391,7 +406,7 @@ class PCB2GCode:
         self.dismiss()
         self.app.refresh()
         self.app.setStatus(_("PCB2GCode created files in {}".format(output_path)))
-              
+        
     def split_drill_sizes(self, output_path):
         """ Splits the drill GCode file into multiple files, one per drill tool size
         """
